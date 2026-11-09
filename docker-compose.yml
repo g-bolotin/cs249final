@@ -1,0 +1,26 @@
+services:
+  node1:
+    build: .
+    ports: ["8001:8000"]
+    environment:
+      - NODE_ID=node-1
+      - SEED_PEERS=http://node2:8000,http://node3:8000
+    volumes: ["node1_data:/data"]
+  node2:
+    build: .
+    ports: ["8002:8000"]
+    environment:
+      - NODE_ID=node-2
+      - SEED_PEERS=http://node1:8000,http://node3:8000
+    volumes: ["node2_data:/data"]
+  node3:
+    build: .
+    ports: ["8003:8000"]
+    environment:
+      - NODE_ID=node-3
+      - SEED_PEERS=http://node1:8000,http://node2:8000
+    volumes: ["node3_data:/data"]
+volumes:
+  node1_data:
+  node2_data:
+  node3_data:
