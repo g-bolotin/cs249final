@@ -5,7 +5,7 @@ import json
 import sqlite3
 import logging
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
-from app.db import init_db, DB_PATH
+from app.db import init_db, get_db_path
 from pydantic import BaseModel
 
 # Node/Peer IDs
@@ -32,7 +32,7 @@ def log_event(direction: str, endpoint: str, payload: dict):
         "payload": payload
     }
     logger.info(json.dumps(entry))
-    with sqlite3.connect(DB_PATH) as conn:
+    with sqlite3.connect(get_db_path()) as conn:
         conn.execute(
             "INSERT OR REPLACE INTO message_log VALUES (?, ?, ?, ?, ?)",
             (str(uuid.uuid4()), direction, endpoint, ts, json.dumps(payload))
@@ -51,7 +51,7 @@ def queue_local_notifs(artwork_id: str, artist: str, title: str) -> list[str]:
     ts = time.time()
     notified_users = []
 
-    with sqlite3.connect(DB_PATH) as conn:
+    with sqlite3.connect(get_db_path()) as conn:
         # Look up artist or work in subscriptions
         # DISTINCT so that if a user follows an artist and their specific work, they'll only get 1 update
         rows = conn.execute(
@@ -93,7 +93,7 @@ async def health():
 # Get subscriber's notif inbox
 @app.get("/notifications/{subscriber_id}")
 async def get_notifs(subscriber_id: str):
-    with sqlite3.connect(DB_PATH) as conn:
+    with sqlite3.connect(get_db_path()) as conn:
         rows = conn.execute(
             """
             SELECT id, artwork_id, artist, title, status, created_at
@@ -135,7 +135,7 @@ async def publish(
 
     # Attach tags
     tag_list = [t.strip() for t in tags.split(",") if t.strip()]
-    with sqlite3.connect(DB_PATH) as conn:
+    with sqlite3.connect(get_db_path()) as conn:
         conn.execute("INSERT INTO artworks VALUES (?, ?, ?, ?, ?)", (art_id, artist, title, file_path, ts))
         for t in tag_list:
             parts = t.split(":", 1)
@@ -166,7 +166,7 @@ async def subscribe(req: SubscriptionRequest):
         raise HTTPException(status_code=400, detail="action must be 'follow' or 'unfollow'")
 
     ts = time.time()
-    with sqlite3.connect(DB_PATH) as conn:
+    with sqlite3.connect(get_db_path()) as conn:
         # Add Follow into subscriptions db
         if req.action == "follow":
             conn.execute(
@@ -208,12 +208,12 @@ async def gossip(payload: dict):
 
         if art_id and artist and title:
             # Check if we already have this artwork stored locally (prevent dupes)
-            with sqlite3.connect(DB_PATH) as conn:
+            with sqlite3.connect(get_db_path()) as conn:
                 exists = conn.execute("SELECT 1 FROM artworks WHERE id = ?", (art_id,)).fetchone()
 
             if not exists:
                 # If received via gossip from another node, log it locally so followers get notified
-                with sqlite3.connect(DB_PATH) as conn:
+                with sqlite3.connect(get_db_path()) as conn:
                     conn.execute(
                         "INSERT OR IGNORE INTO artworks VALUES (?, ?, ?, ?, ?)",
                         (art_id, artist, title, "gossiped_metadata_only", payload.get("timestamp", time.time()))

@@ -1,12 +1,15 @@
 import sqlite3
 import os
 
-DB_PATH = os.getenv("DB_PATH", "/data/node.db")
+# Helper to ensure path is dynamically updated instead of eval'd once on import
+def get_db_path():
+    return os.getenv("DB_PATH", "/data/node.db")
 
 def init_db():
     """Initialize database with tables for artworks, tags, and message log."""
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    with sqlite3.connect(DB_PATH) as conn:
+    db_path = get_db_path()
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    with sqlite3.connect(db_path) as conn:
         # Artwork information and media path
         conn.execute("""
             CREATE TABLE IF NOT EXISTS artworks (

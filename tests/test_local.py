@@ -46,6 +46,16 @@ def test_publish_and_sqlite_storage():
     assert logs >= 1
 
 def test_stub_endpoints():
-    for endpoint in ["/subscribe", "/gossip", "/agent"]:
+    # /subscribe expects a valid SubscriptionRequest payload
+    res = client.post("/subscribe", json={
+        "subscriber_id": "user_test",
+        "target_type": "artist",
+        "target_value": "daft_punk",
+        "action": "follow"
+    })
+    assert res.status_code == 200
+
+    # /gossip and /agent can take arbitrary dictionaries as payloads
+    for endpoint in ["/gossip", "/agent"]:
         res = client.post(endpoint, json={"test": "payload"})
         assert res.status_code == 200
