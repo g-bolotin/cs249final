@@ -4,8 +4,9 @@ import uuid
 import json
 import sqlite3
 import logging
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from app.db import init_db, DB_PATH
+from pydantic import BaseModel
 
 # Node/Peer IDs
 NODE_ID = os.getenv("NODE_ID", "node-local")
@@ -80,10 +81,44 @@ async def publish(
 
 # Subscribe to a post
 # TODO: expand stub
+class SubscriptionRequest(BaseModel):
+    subscriber_id: str
+    target_type: str  # Must be "artist" or "work"
+    target_value: str
+    action: str = "follow"  # follow or unfollow
 @app.post("/subscribe")
-async def subscribe(payload: dict):
+async def subscribe(req: SubscriptionRequest):
+
+    # Request integrity check
+    if req.target_type not in ("artist", "work"):
+        raise HTTPException(status_code=400, detail="target_type must be 'artist' or 'work'")
+    if req.action not in ("follow", "unfollow"):
+        raise HTTPException(status_code=400, detail="action must be 'follow' or 'unfollow'")
+
+    ts = time.time()
+    with sqlite3.connect(DB_PATH) as conn:
+        # Add Follow into subscriptions db
+        if req.action == "follow":
+            conn.execute(
+                "INSERT OR IGNORE INTO subscriptions VALUES (?, ?, ?, ?)",
+                (req.subscriber_id, req.target_type, req.target_value, ts)
+            )
+        # Otherwise unfollow (remove from subscriptions)
+        else:
+            conn.execute(
+                "DELETE FROM subscriptions WHERE subscriber_id=? AND target_type=? AND target_value=?",
+                (req.subscriber_id, req.target_type, req.target_value)
+            )
+
+    # Log and send request
+    payload = req.model_dump()
     log_event("RECV", "/subscribe", payload)
-    return {"status": "stub_subscribe", "node_id": NODE_ID}
+    return {
+        "status": "subscribed" if req.action == "follow" else "unsubscribed",
+        "node_id": NODE_ID,
+        "subscription": payload,
+        "timestamp": ts
+    }
 
 # Entry point for gossip protocol
 # TODO: expand stub

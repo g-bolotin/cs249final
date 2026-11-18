@@ -7,6 +7,7 @@ def init_db():
     """Initialize database with tables for artworks, tags, and message log."""
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     with sqlite3.connect(DB_PATH) as conn:
+        # Artwork information and media path
         conn.execute("""
             CREATE TABLE IF NOT EXISTS artworks (
                 id TEXT PRIMARY KEY,
@@ -16,6 +17,8 @@ def init_db():
                 created_at REAL NOT NULL
             )
         """)
+
+        # Tags under artwork
         conn.execute("""
             CREATE TABLE IF NOT EXISTS tags (
                 artwork_id TEXT NOT NULL,
@@ -24,6 +27,8 @@ def init_db():
                 FOREIGN KEY(artwork_id) REFERENCES artworks(id)
             )
         """)
+
+        # Log messages
         conn.execute("""
             CREATE TABLE IF NOT EXISTS message_log (
                 msg_id TEXT PRIMARY KEY,
@@ -31,5 +36,29 @@ def init_db():
                 endpoint TEXT NOT NULL,
                 timestamp REAL NOT NULL,
                 payload TEXT NOT NULL
+            )
+        """)
+
+        # Who a subscriber follows (either artist or artwork)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS subscriptions (
+                subscriber_id TEXT NOT NULL,
+                target_type TEXT NOT NULL CHECK(target_type IN ('artist', 'work')),
+                target_value TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                PRIMARY KEY (subscriber_id, target_type, target_value)
+            )
+        """)
+
+        # Local inbox for notifications, sent when a matching publish event arrives
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS notifications (
+                id TEXT PRIMARY KEY,
+                subscriber_id TEXT NOT NULL,
+                artwork_id TEXT NOT NULL,
+                artist TEXT NOT NULL,
+                title TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'queued',
+                created_at REAL NOT NULL
             )
         """)
