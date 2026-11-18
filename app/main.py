@@ -143,9 +143,12 @@ async def publish(
             t_val = parts[1] if len(parts) > 1 else parts[0]
             conn.execute("INSERT INTO tags VALUES (?, ?, ?)", (art_id, t_type, t_val))
 
+    # Trigger local notifications for anyone on this node following the artist or work
+    notified = queue_local_notifs(art_id, artist, title)
+
     # Log publish and execute
-    log_event("RECV", "/publish", {"artwork_id": art_id, "artist": artist, "tags": tag_list})
-    return {"artwork_id": art_id, "node_id": NODE_ID, "stored_at": ts}
+    log_event("RECV", "/publish", {"artwork_id": art_id, "artist": artist, "tags": tag_list, "notified_count": len(notified)})
+    return {"artwork_id": art_id, "node_id": NODE_ID, "stored_at": ts, "notified_count": len(notified)}
 
 # Subscribe to a post
 class SubscriptionRequest(BaseModel):
@@ -188,11 +191,36 @@ async def subscribe(req: SubscriptionRequest):
     }
 
 # Entry point for gossip protocol
-# TODO: expand stub
+# TODO: Make sure this works with whatever the final gossip protocol implementation is
 @app.post("/gossip")
 async def gossip(payload: dict):
+    """
+        Receives gossip payloads from peer nodes.
+        Expected payload structure: {"event_type": "PUBLISH", "artwork_id": "...", "artist": "...", "title": "...", ...}
+        """
     log_event("RECV", "/gossip", payload)
-    return {"status": "stub_gossip", "node_id": NODE_ID}
+
+    event_type = payload.get("event_type")
+    if event_type == "PUBLISH":
+        art_id = payload.get("artwork_id")
+        artist = payload.get("artist")
+        title = payload.get("title")
+
+        if art_id and artist and title:
+            # Check if we already have this artwork stored locally (prevent dupes)
+            with sqlite3.connect(DB_PATH) as conn:
+                exists = conn.execute("SELECT 1 FROM artworks WHERE id = ?", (art_id,)).fetchone()
+
+            if not exists:
+                # If received via gossip from another node, log it locally so followers get notified
+                with sqlite3.connect(DB_PATH) as conn:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO artworks VALUES (?, ?, ?, ?, ?)",
+                        (art_id, artist, title, "gossiped_metadata_only", payload.get("timestamp", time.time()))
+                    )
+                queue_local_notifs(art_id, artist, title)
+
+    return {"status": "gossip_processed", "node_id": NODE_ID}
 
 # Entry point for mobile agent
 # TODO: expand stub
