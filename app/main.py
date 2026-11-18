@@ -42,12 +42,80 @@ def log_event(direction: str, endpoint: str, payload: dict):
 # TODO: Change title to whatever we decide to name the project
 app = FastAPI(title=f"Pub/Sub Art Node ({NODE_ID})")
 
+# Helper Functions
+def queue_local_notifs(artwork_id: str, artist: str, title: str) -> list[str]:
+    """
+    Checks subscriptions table for anyone following specified artist
+    or work. Inserts a 'queued' notification for each match.
+    """
+    ts = time.time()
+    notified_users = []
+
+    with sqlite3.connect(DB_PATH) as conn:
+        # Look up artist or work in subscriptions
+        # DISTINCT so that if a user follows an artist and their specific work, they'll only get 1 update
+        rows = conn.execute(
+            """
+            SELECT DISTINCT subscriber_id FROM subscriptions
+            WHERE (target_type = 'artist' AND target_value = ?)
+               OR (target_type = 'work' AND target_value = ?)
+            """,
+            (artist, artwork_id)
+        ).fetchall()
+
+        # Create notification and queue into user inbox
+        for (sub_id,) in rows:
+            # Deterministic ID prevents duplicate notifications if a gossip message is processed twice
+            notif_id = f"{sub_id}:{artwork_id}"
+            cursor = conn.execute(
+                "INSERT OR IGNORE INTO notifications VALUES (?, ?, ?, ?, ?, 'queued', ?)",
+                (notif_id, sub_id, artwork_id, artist, title, ts)
+            )
+            if cursor.rowcount > 0:
+                notified_users.append(sub_id)
+
+    # Log upon queueing notifs
+    if notified_users:
+        log_event("INTERNAL", "queue_notifications", {
+            "artwork_id": artwork_id,
+            "artist": artist,
+            "notified_subscribers": notified_users
+        })
+    return notified_users
+
 # GET Endpoints
-# Fo node health checking
+# For node health checking
 @app.get("/health")
 async def health():
     log_event("RECV", "/health", {"status": "ok"})
     return {"node_id": NODE_ID, "status": "healthy", "peers": SEED_PEERS, "timestamp": time.time()}
+
+# Get subscriber's notif inbox
+@app.get("/notifications/{subscriber_id}")
+async def get_notifs(subscriber_id: str):
+    with sqlite3.connect(DB_PATH) as conn:
+        rows = conn.execute(
+            """
+            SELECT id, artwork_id, artist, title, status, created_at
+            FROM notifications
+            WHERE subscriber_id = ?
+            ORDER BY created_at DESC
+            """,
+            (subscriber_id,)
+        ).fetchall()
+
+    results = [
+        {
+            "id": r[0],
+            "artwork_id": r[1],
+            "artist": r[2],
+            "title": r[3],
+            "status": r[4],
+            "created_at": r[5]
+        }
+        for r in rows
+    ]
+    return {"node_id": NODE_ID, "subscriber_id": subscriber_id, "notifications": results}
 
 # POST Endpoints
 # Publish artwork
@@ -80,7 +148,6 @@ async def publish(
     return {"artwork_id": art_id, "node_id": NODE_ID, "stored_at": ts}
 
 # Subscribe to a post
-# TODO: expand stub
 class SubscriptionRequest(BaseModel):
     subscriber_id: str
     target_type: str  # Must be "artist" or "work"
