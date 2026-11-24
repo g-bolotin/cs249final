@@ -4,6 +4,9 @@ import uuid
 import json
 import sqlite3
 import logging
+import threading
+from app.gossip_protocol import Gossip
+#do the same for agents if they are in a separate file
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from app.db import init_db, get_db_path
 from pydantic import BaseModel
@@ -192,6 +195,31 @@ async def subscribe(req: SubscriptionRequest):
 
 # Entry point for gossip protocol
 # TODO: Make sure this works with whatever the final gossip protocol implementation is
+# TODO: Add NODE_ADDR
+gossip = Gossip(NODE_ID, NODE_ADDR, SEED_PEERS, queue_local_notifs)
+gossip.lock = threading.Lock()
+
+def start_gossip():
+    gossip.start()
+
+def leave_gossip():
+    gossip.stop_gossiping() #swiper no swiping 
+
+def process_gossip(payload: dict):
+    log_event("RECV", "/gossip", payload)
+    
+    try:
+        return gossip.process_request(payload)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+def gossip_train_members():
+    with gossip.lock:
+        peers = {p: dict(info) for p, info in gossip.peers.items()}
+        
+    return {"node_id": NODE_ID, "gossip train caller": NODE_ADDR, "peers": peers}
+
+#idk if we need this anymore since there's an entire file dedicated to it --deanna
 @app.post("/gossip")
 async def gossip(payload: dict):
     """
